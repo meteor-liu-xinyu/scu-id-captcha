@@ -1,0 +1,37 @@
+﻿# ── 训练数据 ──
+data/img/
+data/*.npy
+data/*.json
+
+# ── 训练产物 ──
+checkpoints/
+runs/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# ── 导出产物 ──
+model_weights.json
+model_meta.json
+
+# ── 备份（旧代码/权重，仅本地参考）──
+backups/
+
+# ── 环境 ──
+.venv/
+venv/
+env/
+
+# ── IDE ──
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ── 系统 ──
+Thumbs.db
+.DS_Store
