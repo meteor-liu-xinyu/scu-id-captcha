@@ -15,11 +15,13 @@ CHARSET = "0123456789abcdefghijklmnopqrstuvwxyz"
 NUM_CLASSES = len(CHARSET)  # 36
 CHAR_H, CHAR_W = 28, 20
 
+ROOT = Path(__file__).resolve().parent.parent
+
 
 def main():
     print('加载单字符数据...')
-    char_x = np.load('../data/char_x.npy').astype(np.float32)  # (N, 28, 20)
-    char_y = np.load('../data/char_y.npy')                     # (N,)
+    char_x = np.load(str(ROOT / 'data/char_x.npy')).astype(np.float32)  # (N, 28, 20)
+    char_y = np.load(str(ROOT / 'data/char_y.npy'))                     # (N,)
 
     # 过滤不足 2 样本的类
     valid = np.ones(len(char_y), dtype=bool)
@@ -82,7 +84,7 @@ def main():
     print(f'uint8 量化准确率:  {acc_u8:.4f} ({acc_u8*100:.2f}%)')
 
     # 保存
-    model_path = Path('../checkpoints/centroid_model.npz')
+    model_path = ROOT / 'checkpoints' / 'centroid_model.npz'
     model_path.parent.mkdir(parents=True, exist_ok=True)
     np.savez(model_path, centroids=centroids_u8)
     size_kb = model_path.stat().st_size / 1024

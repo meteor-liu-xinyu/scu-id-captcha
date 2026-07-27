@@ -9,10 +9,12 @@ import base64
 import numpy as np
 from pathlib import Path
 
+ROOT = Path(__file__).resolve().parent.parent
+
 
 def export():
     # 加载训练好的质心模板
-    data = np.load('../checkpoints/centroid_model.npz', allow_pickle=False)
+    data = np.load(str(ROOT / 'checkpoints' / 'centroid_model.npz'), allow_pickle=False)
     centroids_u8 = data['centroids']  # (36, 560) uint8, 0-255
 
     # uint8 原值导出（JS 端转 float 做欧氏距离）
@@ -39,7 +41,7 @@ def export():
         },
     }
 
-    out_path = Path('../model_centroid.json')
+    out_path = ROOT / 'model_centroid.json'
     with open(out_path, 'w', encoding='utf-8') as f:
         json.dump(model, f, ensure_ascii=False)
 
