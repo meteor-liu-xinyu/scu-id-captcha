@@ -130,8 +130,8 @@ def preprocess_from_npy(x_raw):
     return np.stack(cleaned_list, axis=0)
 
 
-_CHAR_IMG_H = 28
-_CHAR_IMG_W = 20
+_CHAR_IMG_H = 8
+_CHAR_IMG_W = 6
 
 
 def segment_characters(img_bgr, char_h=_CHAR_IMG_H, char_w=_CHAR_IMG_W):

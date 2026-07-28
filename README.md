@@ -2,17 +2,17 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-四川大学统一身份认证系统 (`id.scu.edu.cn`) 验证码 OCR — **质心模板匹配**极简实现。
+SCU统一身份认证系统 (`id.scu.edu.cn`) 验证码 OCR — **质心模板匹配**极简实现。
 
 | 指标 | 数值 |
 |------|------|
-| 模型大小 | **~20 KB**（JSON，base64 编码 uint8 质心） |
-| 参数量 | **20,160**（36 类 × 560 维） |
-| 推理代码 | **~40 行**（分类器）+ **~90 行**（预处理） |
-| 单字符准确率 | **99.60%**（36 类：0-9, a-z） |
-| 整图准确率 | **98.4%**（4 位） |
-| 推理速度 | **~570 字符/秒**（CPU，单线程 JS） |
-| 外部依赖 | **无**（推理零 npm 依赖） |
+| 模型大小 | **~2.0 KB**（NPZ）/ **~2.7 KB**（JSON，base64） |
+| 特征维度 | **49**（48 像素 + 1 宽高比） |
+| 推理代码 | **~70 行**（分类器）+ **~100 行**（预处理） |
+| 单字符准确率 | **99.67%**（36 类：0-9, a-z） |
+| 整图准确率 | **98.7%**（4 位） |
+| 推理速度 | **~806 张/秒**（CPU，Python） |
+| 外部依赖 | 推理仅 numpy + opencv-python |
 
 ---
 
@@ -56,14 +56,15 @@
 │  └───────┬───────┘    │
 └──────────┬───────────┘
            ▼
-  4 个 (28×20 = 560 维) 特征向量
+  4 个 (8×6 = 48 维二值图 + 1 维宽高比) 特征向量
            │
            ▼
 ┌──────────────────────┐
 │  2. 分类              │
 │  对每个字符：          │
 │    计算与 36 个质心    │
-│    的 Euclidean 距离   │
+│    的加权距离          │
+│    pixel_dist + 25×ar² │
 │    → argmin → 类别     │
 └──────────────────────┘
            │
@@ -106,10 +107,24 @@ if all(abs(pixel - LINE_COLOR_RGB) <= TOLERANCE):
 每个裁剪出的字符区域：
 
 1. 转灰度：`gray = 0.299·R + 0.587·G + 0.114·B`
-2. 最近邻插值缩放到 **28×20**（保持硬边缘）
+2. 最近邻插值缩放到 **8×6**（保持硬边缘）
 3. 二值化：`value = 1 if gray < 0.7 else 0`
 
-结果：每个字符得到一个 **560 维二值向量**（28×20），白字黑底表示。
+结果：每个字符得到一个 **48 维二值向量**（8×6），白字黑底表示。
+
+### 宽高比特征
+
+每个字符额外提取宽高比作为第 49 维特征：
+
+```
+ar = bbox_width / max(bbox_height, 1)
+ar_norm = clip(ar / 2.0, 0.0, 1.0)
+```
+
+最终特征向量 = [48 像素值, ar_norm]，维度 **49**。
+
+分类时使用加权距离：`dist = Σ(pixel_diff²) + 25 × (ar_diff²)`，
+其中宽高比权重 **25** 通过实验调优（有效区分 w/a 等宽高比差异显著的字符对）。
 
 ## 分类：质心模板匹配
 
@@ -117,30 +132,28 @@ if all(abs(pixel - LINE_COLOR_RGB) <= TOLERANCE):
 
 对 36 个字符类中的每一类（`0123456789abcdefghijklmnopqrstuvwxyz`）：
 
-1. 收集属于该类所有预处理后的字符图像（560 维二值向量）
-2. 计算所有样本的**均值向量**（centroid）
+1. 收集属于该类所有预处理后的字符图像（48 维二值向量）+ 宽高比归一化值
+2. 计算所有样本的**均值向量**（centroid，49 维）
 3. 量化为 **uint8** 归一化到 [0, 255]
 
-质心代表了该字符经过预处理后的"平均外观"。
+质心代表了该字符经过预处理后的"平均外观"（含平均宽高比）。
 
 ### 推理
 
 ```python
-def classify(feature_vector):
-    best_dist = INF
-    best_class = 0
-    for c in range(36):                    # 36 个字符类
-        dist = 0
-        for i in range(560):               # 28 × 20 像素
-            d = feature_vector[i] - centroid[c][i]
-            dist += d * d                  # 平方 Euclidean 距离
-        if dist < best_dist:
-            best_dist = dist
-            best_class = c
-    return charset[best_class]
+def classify(feature_vector, centroids):
+    diff = feature_vector - centroids          # (36, 49)
+    pixel_dist = (diff[:, :-1] ** 2).sum(1)    # (36,) 像素距离
+    ar_dist = 25.0 * (diff[:, -1] ** 2)        # (36,) 宽高比距离
+    dists = pixel_dist + ar_dist               # (36,)
+    pred = dists.argmin()
+    return charset[pred]
 ```
 
-**置信度**：`confidence = 1 - best_dist / worst_dist` — 最近质心比最远质心近得多时，置信度高。
+**置信度**：`confidence = 1 - d_min / d_max` — 最近质心比最远质心近得多时，置信度高。
+
+**加权距离**：宽高比分量的权重 `AR_WEIGHT=25` 在距离计算时施加（而非在特征向量中加权），
+避免 uint8 量化截断导致宽高比信息丢失。
 
 ### 权重格式
 
@@ -149,14 +162,16 @@ def classify(feature_vector):
 ```json
 {
   "model_type": "centroid_template",
-  "version": "2.0",
+  "version": "2.1",
   "charset": "0123456789abcdefghijklmnopqrstuvwxyz",
   "num_classes": 36,
-  "char_h": 28,
-  "char_w": 20,
-  "input_dim": 560,
+  "char_h": 8,
+  "char_w": 6,
+  "input_dim": 49,
+  "ar_weight": 25.0,
+  "max_aspect_ratio": 2.0,
   "centroids_b64": "<base64 编码的 uint8 数组>",
-  "centroids_shape": [36, 560],
+  "centroids_shape": [36, 49],
   "preprocessing": {
     "gray_line_color": [111, 110, 112],
     "gray_line_tolerance": 10,
@@ -167,7 +182,7 @@ def classify(feature_vector):
 }
 ```
 
-- `centroids_b64`：36 × 560 = 20,160 个 uint8 值，base64 编码 → 磁盘约 **27 KB**
+- `centroids_b64`：36 × 49 = 1,764 个 uint8 值，base64 编码 → 磁盘约 **2.7 KB**
 - 无需自定义二进制格式，无需单独的 fetch 请求
 
 ## 为什么有效
@@ -185,8 +200,9 @@ def classify(feature_vector):
 
 | 方面 | CNN（此前方案） | 质心法（当前方案） |
 |------|---------------|------------------|
-| 参数量 | ~113K (~443 KB) | **20K (~20 KB)** |
-| 每字符计算量 | ~0.1M（卷积） | **~20K（点积）** |
+| 参数量 | ~113K (~443 KB) | **1,764（49 维 × 36 类）** |
+| 模型大小 | ~443 KB | **~2.7 KB（JSON）** |
+| 每字符计算量 | ~0.1M（卷积） | **~1.8K（点积）** |
 | 所需训练数据 | 每类数千张 | **每类数百张即可** |
 | 模型复杂度 | Conv×3, FC×3, BN×3 | **每类一个质心** |
 | 扩展性 | 必须重新训练整个模型 | **仅更新质心即可** |
@@ -196,31 +212,28 @@ def classify(feature_vector):
 ```
 scu-id-captcha/
 ├── preprocess.py            # 去灰线 + 字符分割（核心预处理）
-├── predict_centroid.py      # 质心模板识别流水线
-├── model_centroid.json      # 预训练质心权重 (~27 KB)
-├── requirements.txt         # 推理依赖（仅 numpy + opencv-python）
+├── predict_centroid.py      # 质心模板识别流水线（含宽高比特征）
+├── model_centroid.json      # 预训练质心权重 (~2.7 KB)
+├── requirements.txt         # 推理依赖（numpy + opencv-python）
 ├── README.md                # 本文档
 │
 ├── training/                # 训练代码
-│   ├── train_centroid.py    #   质心模板训练（推荐）
+│   ├── train_centroid.py    #   质心模板训练
 │   ├── export_centroid.py   #   导出质心为 JSON
-│   └── requirements.txt     #   训练依赖（numpy + opencv-python 即可）
+│   └── requirements.txt     #   训练依赖
 │
 ├── data/                    # 训练数据（gitignore）
-│   ├── x.npy                #   全图数据 (N, 26, 80, 3)
+│   ├── x.npy                #   全图数据 (N, 80, 26, 3)
 │   ├── y.npy                #   标签 (N, 4)
-│   ├── char_x.npy           #   单字符数据 (N, 28, 20)
+│   ├── char_x.npy           #   单字符数据 (N, 8, 6)
 │   ├── char_y.npy           #   单字符标签 (N,)
+│   ├── char_ar.npy          #   单字符宽高比 (N,)
 │   └── img/                 #   原始 PNG 图片
 └── checkpoints/             # 模型权重（gitignore）
-    ├── centroid_model.npz   #   质心模板 (~20 KB)
-    ├── char_classifier.pkl  #   旧版 sklearn 模型 (158 KB)
-    ├── model_best.pth       #   旧版 CNN 最佳模型
-    └── model_final.pth      #   旧版 CNN 最终模型
+    └── centroid_model.npz   #   质心模板 (~2.0 KB)
 ```
 
-> **发布推理**：仅需根目录 `preprocess.py` + `predict_centroid.py` + `model_centroid.json` 三个文件。  
-> **JS 端**：甚至只需 `model_centroid.json` 一个文件（搭配预处理参数的 Canvas 实现）。
+> **发布推理**：仅需根目录 `preprocess.py` + `predict_centroid.py` + `model_centroid.json` 三个文件。
 
 ## 快速开始
 
@@ -247,7 +260,7 @@ python predict_centroid.py --image captcha.png       # 识别单张
 ```bash
 cd training
 python train_centroid.py
-# 输出: ../checkpoints/centroid_model.npz (~20 KB)
+# 输出: ../checkpoints/centroid_model.npz (~2.0 KB)
 ```
 
 ### 导出模型权重
@@ -260,12 +273,12 @@ python export_centroid.py
 
 ## 性能对比
 
-| 模型 | 单字符准确率 | 整图准确率 | 模型大小 | 参数量 |
-|------|------------|-----------|---------|--------|
-| **质心模板**（推荐） | **99.60%** | **98.4%** | **~20 KB** | **20,160** |
-| Logistic Regression（旧） | 99.60% | 98.4% | 158 KB | 20,160 |
-| CharCNN_Simple（旧） | ~99.5% | ~98% | ~5 KB | ~5,000 |
-| CharCNN（旧） | ~99.7% | ~98.5% | ~12 KB | ~12,000 |
+| 模型 | 单字符准确率 | 整图准确率 | 模型大小 | 特征维度 |
+|------|------------|-----------|---------|---------|
+| **质心模板**（当前） | **99.67%** | **98.7%** | **~2.7 KB** | **49（48px + 1ar）** |
+| 质心模板 v1（旧） | 99.60% | 98.4% | ~20 KB | 560（28×20） |
+| Logistic Regression（旧） | 99.60% | 98.4% | 158 KB | 560 |
+| CharCNN（旧） | ~99.7% | ~98.5% | ~12 KB | — |
 
 ## 浏览器插件集成
 
@@ -277,15 +290,19 @@ const raw = Uint8Array.from(atob(model.centroids_b64), c => c.charCodeAt(0));
 const centroids = new Float32Array(raw.length);
 for (let i = 0; i < raw.length; i++) centroids[i] = raw[i] / 255;
 
-// 2. 分类一个字符特征向量 (560 维)
+// 2. 分类一个字符特征向量 (49 维：48 像素 + 1 宽高比)
 function classify(feature) {
   let bestIdx = 0, bestDist = Infinity;
+  const AR_W = 25.0;
   for (let c = 0; c < 36; c++) {
-    let dist = 0;
-    for (let i = 0; i < 560; i++) {
-      const d = feature[i] - centroids[c * 560 + i];
-      dist += d * d;
+    let pixelDist = 0;
+    const offset = c * 49;
+    for (let i = 0; i < 48; i++) {
+      const d = feature[i] - centroids[offset + i];
+      pixelDist += d * d;
     }
+    const arDiff = feature[48] - centroids[offset + 48];
+    const dist = pixelDist + AR_W * arDiff * arDiff;
     if (dist < bestDist) { bestDist = dist; bestIdx = c; }
   }
   return charset[bestIdx];

@@ -16,13 +16,22 @@ sys.path.insert(0, str(Path(__file__).parent))
 from preprocess import segment_characters
 
 _CHARSET = "0123456789abcdefghijklmnopqrstuvwxyz"
-_CHAR_H, _CHAR_W = 28, 20
+_CHAR_H, _CHAR_W = 8, 6
+_FEAT_DIM = _CHAR_H * _CHAR_W  # 48
+_FEAT_DIM_WITH_AR = _FEAT_DIM + 1  # 49
+_MAX_ASPECT_RATIO = 2.0
+_AR_WEIGHT = 25.0
+
+
+def _normalize_ar(ar):
+    """宽高比归一化到 [0, 1]（不加权，加权在距离计算时做）"""
+    return np.clip(ar / _MAX_ASPECT_RATIO, 0.0, 1.0)
 
 
 def load_model(model_path='checkpoints/centroid_model.npz'):
     """加载质心模板。"""
     data = np.load(model_path, allow_pickle=False)
-    centroids = data['centroids'].astype(np.float32) / 255.0  # (36, 560)
+    centroids = data['centroids'].astype(np.float32) / 255.0  # (36, 49)
     return centroids
 
 
@@ -44,9 +53,17 @@ def recognize(img_bgr, centroids):
     text = ''
     confs = []
     for ch in chars:
-        feat = ch['image'].reshape(1, -1)              # (1, 560)
-        diff = feat - centroids                         # (36, 560)
-        dists = (diff ** 2).sum(axis=1)                 # (36,)
+        feat_pixels = ch['image'].reshape(1, -1)              # (1, 48)
+        # 从 bbox 计算宽高比
+        x1, y1, x2, y2 = ch['bbox']
+        bw, bh = x2 - x1 + 1, y2 - y1 + 1
+        ar = bw / max(bh, 1)
+        ar_norm = _normalize_ar(ar)                           # scalar
+        feat = np.column_stack([feat_pixels, [[ar_norm]]])    # (1, 49)
+        diff = feat - centroids                                # (36, 49)
+        pixel_dist = (diff[:, :-1] ** 2).sum(axis=1)           # (36,)
+        ar_dist = _AR_WEIGHT * (diff[:, -1] ** 2)              # (36,)
+        dists = pixel_dist + ar_dist                           # (36,)
         pred = int(dists.argmin())
         # 置信度：用最小距离与最大距离的相对差距
         d_min, d_max = dists.min(), dists.max()

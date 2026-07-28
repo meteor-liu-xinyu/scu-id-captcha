@@ -15,29 +15,31 @@ ROOT = Path(__file__).resolve().parent.parent
 def export():
     # 加载训练好的质心模板
     data = np.load(str(ROOT / 'checkpoints' / 'centroid_model.npz'), allow_pickle=False)
-    centroids_u8 = data['centroids']  # (36, 560) uint8, 0-255
+    centroids_u8 = data['centroids']  # (36, 49) uint8, 0-255
 
     # uint8 原值导出（JS 端转 float 做欧氏距离）
-    raw_bytes = centroids_u8.tobytes()  # 36 * 560 = 20160 bytes
+    raw_bytes = centroids_u8.tobytes()  # 36 * 49 = 1764 bytes
     b64 = base64.b64encode(raw_bytes).decode('ascii')
 
     # 构造 JSON
     model = {
         'model_type': 'centroid_template',
-        'version': '2.0',
+        'version': '2.1',
         'charset': '0123456789abcdefghijklmnopqrstuvwxyz',
         'num_classes': 36,
-        'char_h': 28,
-        'char_w': 20,
-        'input_dim': 560,
+        'char_h': 8,
+        'char_w': 6,
+        'input_dim': 49,
         'centroids_b64': b64,
-        'centroids_shape': [36, 560],
+        'centroids_shape': [36, 49],
         'preprocessing': {
             'gray_line_color': [111, 110, 112],
             'gray_line_tolerance': 10,
             'color_quantize_step': 8,
             'num_chars': 4,
             'char_threshold': 0.3,
+            'max_aspect_ratio': 2.0,
+            'ar_weight': 25.0,
         },
     }
 
@@ -47,7 +49,7 @@ def export():
 
     print(f'模型已导出: {out_path}')
     print(f'文件大小: {out_path.stat().st_size / 1024:.2f} KB')
-    print(f'模板: 36 类 × 560 像素, uint8 欧氏距离')
+    print(f'模板: 36 类 × 48 像素, uint8 欧氏距离')
     print(f'base64 长度: {len(b64)} 字符')
 
 
