@@ -193,7 +193,7 @@ def segment_characters(img_bgr, char_h=_CHAR_IMG_H, char_w=_CHAR_IMG_W):
     for c in range(4):
         centers[c] = char_pixels[labels == c].mean(axis=0)
 
-    # 取包围盒
+    # 取包围盒（颜色蒙版提取：只保留该字符颜色的像素，其余设白）
     char_info = []
     for c in range(4):
         ys, xs = np.where(label_map == c)
@@ -201,7 +201,12 @@ def segment_characters(img_bgr, char_h=_CHAR_IMG_H, char_w=_CHAR_IMG_W):
             continue
         x1, x2 = xs.min(), xs.max()
         y1, y2 = ys.min(), ys.max()
-        char_crop = rgb[y1:y2 + 1, x1:x2 + 1]
+
+        # 颜色蒙版：只取当前颜色的像素，其他颜色设为白色
+        mask_patch = label_map[y1:y2 + 1, x1:x2 + 1]
+        char_crop = rgb[y1:y2 + 1, x1:x2 + 1].copy()
+        char_crop[mask_patch != c] = [255, 255, 255]
+
         char_gray = cv2.cvtColor(char_crop, cv2.COLOR_RGB2GRAY).astype(np.float32) / 255.0
         char_bin = ((1.0 - char_gray) > 0.3).astype(np.float32)
         char_bin = cv2.resize(char_bin, (char_w, char_h), interpolation=cv2.INTER_NEAREST)

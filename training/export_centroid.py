@@ -49,7 +49,7 @@ def export():
 
     print(f'模型已导出: {out_path}')
     print(f'文件大小: {out_path.stat().st_size / 1024:.2f} KB')
-    print(f'模板: 36 类 × 48 像素, uint8 欧氏距离')
+    print(f'模板: 36 类 × 49 维 (48 像素 + 1 宽高比), uint8')
     print(f'base64 长度: {len(b64)} 字符')
 
 
